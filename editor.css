@@ -1,0 +1,230 @@
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Inter", -apple-system, "PingFang TC", "Hiragino Sans", sans-serif;
+    background: #f7f5f0;
+    color: #1f1d1a;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .toolbar {
+    padding: 12px 20px;
+    background: #f7f5f0;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    border-bottom: 1px solid #e3ddd0;
+    flex-wrap: wrap;
+  }
+  .toolbar .brand {
+    font-size: 18px; font-weight: 600;
+    letter-spacing: -0.01em; margin-right: 14px;
+  }
+  .toolbar button {
+    padding: 7px 14px; background: #fff; color: #3a3733;
+    border: 1px solid #e3ddd0; border-radius: 999px;
+    cursor: pointer; font-size: 14px; font-family: inherit;
+    font-weight: 500; transition: all 0.15s ease;
+  }
+  .toolbar button:hover { background: #ededed; border-color: #d6cebd; }
+  .toolbar button.primary { background: #1f1d1a; color: #f7f5f0; border-color: #1f1d1a; }
+  .toolbar button.primary:hover { background: #3a3733; }
+  .toolbar button.danger { color: #8a5544; }
+  .toolbar button.danger:hover { background: #f3e5dd; border-color: #d6b8aa; }
+  .toolbar button.icon { padding: 6px 10px; min-width: 32px; font-size: 14px; font-weight: 600; }
+  .toolbar .divider { width: 1px; height: 18px; background: #d6cebd; margin: 0 4px; }
+  .toolbar #zoomLabel {
+    min-width: 46px; text-align: center; font-size: 14px;
+    color: #3a3733; font-variant-numeric: tabular-nums;
+  }
+
+  .main { display: flex; height: calc(100vh - 49px); }
+
+  .sidebar {
+    width: 250px; background: #f6f6f6;
+    border-right: 1px solid #e3ddd0;
+    flex-shrink: 0; display: flex; flex-direction: column;
+  }
+  .sidebar-header {
+    padding: 14px 18px 10px;
+    font-size: 13px; font-weight: 600;
+    color: #5a5650; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .layer-list { padding: 0 6px 12px; flex: 1; overflow-y: auto; }
+  .layer-empty { padding: 8px 14px; font-size: 14px; color: #a8a08b; }
+  .layer-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-radius: 6px;
+    cursor: pointer; font-size: 14px; user-select: none;
+    position: relative; margin-bottom: 1px;
+  }
+  .layer-row:hover { background: #e6dfd0; }
+  .layer-row.selected { background: #a8a08b; color: #f7f5f0; }
+  .layer-row.dragging { opacity: 0.4; }
+  .layer-arrow {
+    width: 12px; text-align: center; font-size: 9px;
+    color: #8a826f; flex-shrink: 0; cursor: pointer;
+  }
+  .layer-row.selected .layer-arrow { color: #c0bba8; }
+  .layer-thumb {
+    width: 24px; height: 24px; object-fit: cover;
+    border-radius: 3px; flex-shrink: 0; background: #ccc;
+  }
+  .layer-icon {
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 13px;
+  }
+  .layer-name {
+    flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .layer-name-input {
+    flex: 1; min-width: 0;
+    background: #fff; color: #1f1d1a;
+    border: 1px solid #22b8a3; border-radius: 3px;
+    padding: 2px 5px; font-size: 12px;
+    font-family: inherit; outline: none;
+  }
+  .layer-row.drop-above::before, .layer-row.drop-below::after {
+    content: ''; position: absolute; left: 4px; right: 4px;
+    height: 2px; background: #22b8a3; border-radius: 2px;
+    pointer-events: none;
+  }
+  .layer-row.drop-above::before { top: -1px; }
+  .layer-row.drop-below::after { bottom: -1px; }
+  .layer-row.drop-into {
+    background: rgba(34, 184, 163, 0.18);
+    outline: 1px dashed #22b8a3; outline-offset: -2px;
+  }
+
+  .properties {
+    border-top: 1px solid #d6cebd;
+    padding: 14px 16px; flex-shrink: 0;
+    max-height: 320px; overflow-y: auto;
+    background: #ebe5d9;
+  }
+  .properties-header {
+    font-size: 11px; font-weight: 600;
+    color: #5a5650; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .prop-row { margin-bottom: 12px; }
+  .prop-label {
+    color: #5a5650; font-size: 11px;
+    margin-bottom: 4px; font-weight: 500;
+  }
+  .prop-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .prop-mode-btn {
+    padding: 6px 4px; background: #fff;
+    border: 1px solid #d6cebd; border-radius: 4px;
+    font-size: 11px; cursor: pointer; font-family: inherit;
+    transition: all 0.12s;
+  }
+  .prop-mode-btn:hover { background: #ededed; }
+  .prop-mode-btn.active {
+    background: #1f1d1a; color: #f7f5f0; border-color: #1f1d1a;
+  }
+  .prop-input {
+    padding: 5px 8px; border: 1px solid #d6cebd;
+    border-radius: 4px; font-size: 14px;
+    font-family: inherit; width: 100%;
+    background: #fff;
+  }
+  .prop-inline { display: flex; gap: 6px; align-items: center; }
+  .prop-suffix { font-size: 11px; color: #8a826f; }
+
+  .stage {
+    flex: 1; overflow: auto;
+    background: #ebe5d9; padding: 32px;
+  }
+  .canvas {
+    position: relative; width: 1280px;
+    aspect-ratio: 16 / 9; background: #f6f6f6;
+    overflow: hidden; border-radius: 16px;
+    box-shadow: 0 6px 40px rgba(31, 29, 26, 0.08);
+    margin: 0 auto;
+  }
+  .canvas .bg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover; user-select: none; pointer-events: none;
+  }
+  .canvas .item {
+    position: absolute; cursor: move; user-select: none;
+  }
+  .canvas .item img {
+    width: 100%; height: auto;
+    display: block; pointer-events: none;
+  }
+  .canvas .item.selected,
+  .canvas .group-container.selected {
+    outline: 1.5px solid #22b8a3;
+    outline-offset: 0;
+  }
+  .canvas .item.primary {
+    outline: 2px solid #e0e0e0;
+    outline-offset: 0;
+  }
+
+  .canvas .group-container {
+    position: absolute; user-select: none;
+    box-sizing: border-box;
+  }
+  .canvas .group-container.primary {
+    outline: 2px dashed #e0e0e0;
+    outline-offset: 0;
+    cursor: move;
+  }
+
+  /* DevTools-style flex overlay：JS 計算後生成的斜紋條狀區域
+     只放在 padding 與相鄰項目間的 gap，其他都不畫。 */
+  .canvas .group-container .flex-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+  }
+  .canvas .group-container .flex-overlay-strip {
+    position: absolute;
+    /* tile 邊長 11.3137 ≈ 16/√2，使斜線長度=16=2×(5+3)，每個 dash 都剛好 5px、每個 gap 都 3px */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11.3137' height='11.3137'><line x1='0' y1='11.3137' x2='11.3137' y2='0' stroke='%23ff4f97' stroke-width='1' stroke-dasharray='5,3'/></svg>");
+    background-repeat: repeat;
+    pointer-events: none;
+  }
+  .canvas .group-container .flex-overlay-padding {
+    background-image: none;
+    background-color: rgba(93, 173, 226, 0.4);
+  }
+
+  .canvas .handle {
+    position: absolute; width: 10px; height: 10px;
+    background: #fff; border: 1px solid #1f1d1a;
+    border-radius: 1px; display: none; z-index: 100;
+  }
+  .canvas .item.primary > .handle,
+  .canvas .group-container.primary > .handle { display: block; }
+  .handle.nw { top: -5px; left: -5px; cursor: nwse-resize; }
+  .handle.ne { top: -5px; right: -5px; cursor: nesw-resize; }
+  .handle.sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+  .handle.se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+
+  .canvas .guide {
+    position: absolute; background: #22b8a3;
+    pointer-events: none; z-index: 200;
+  }
+  .canvas .guide-x { top: 0; bottom: 0; width: 1px; }
+  .canvas .guide-y { left: 0; right: 0; height: 1px; }
+
+  .canvas .rubber-band {
+    position: absolute; border: 1px solid #22b8a3;
+    background: rgba(34, 184, 163, 0.12);
+    pointer-events: none; z-index: 150;
+  }
+
+  .canvas .empty-hint {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #a8a08b; font-size: 16px; pointer-events: none;
+  }
