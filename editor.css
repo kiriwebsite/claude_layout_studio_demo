@@ -7,6 +7,8 @@
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
   }
+  body.space-held, body.space-held * { cursor: grab !important; }
+  body.space-panning, body.space-panning * { cursor: grabbing !important; }
 
   .toolbar {
     padding: 12px 20px;
@@ -136,8 +138,13 @@
   .prop-suffix { font-size: 11px; color: #8a826f; }
 
   .stage {
-    flex: 1; overflow: auto;
-    background: #ebe5d9; padding: 32px;
+    flex: 1;
+    overflow: hidden;
+    background: #ebe5d9;
+    padding: 32px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
   }
   .canvas {
     position: relative; width: 1280px;

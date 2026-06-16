@@ -18,7 +18,13 @@
   let history = [];
   let historyIdx = -1;
   let isRestoring = false;
+  let panX = 0, panY = 0;
+  let spaceHeld = false;
+  let isPanning = false;
   const BASE_WIDTH = 1280;
+  function applyPan() {
+    canvas.style.transform = (panX || panY) ? `translate(${panX}px, ${panY}px)` : '';
+  }
 
   const nodeMap = new Map();
   const ROOT_ID = 'root';
@@ -332,6 +338,7 @@
     const p = bgRatio.split('/').map(s => parseFloat(s));
     const cH = BASE_WIDTH * (p[1] / p[0]);
     setZoom(Math.min(sW / BASE_WIDTH, sH / cH));
+    panX = 0; panY = 0; applyPan();
   }
 
   // === Background ===
@@ -1641,8 +1648,52 @@
     if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
       setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9));
+    } else {
+      // 一般滾輪 = 平移畫布 (取代原本的捲軸滾動)
+      e.preventDefault();
+      panX -= e.deltaX;
+      panY -= e.deltaY;
+      applyPan();
     }
   }, { passive: false });
+
+  // === Space + drag 平移畫布 (用 transform 不會干擾畫布尺寸/置中) ===
+  document.addEventListener('keydown', e => {
+    if (e.code !== 'Space' || spaceHeld) return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+    spaceHeld = true;
+    document.body.classList.add('space-held');
+    e.preventDefault();
+  });
+  document.addEventListener('keyup', e => {
+    if (e.code !== 'Space') return;
+    spaceHeld = false;
+    if (!isPanning) document.body.classList.remove('space-held');
+  });
+  stage.addEventListener('mousedown', e => {
+    if (!spaceHeld) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isPanning = true;
+    document.body.classList.add('space-panning');
+    const startX = e.clientX, startY = e.clientY;
+    const startPX = panX, startPY = panY;
+    const move = ev => {
+      panX = startPX + (ev.clientX - startX);
+      panY = startPY + (ev.clientY - startY);
+      applyPan();
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      isPanning = false;
+      document.body.classList.remove('space-panning');
+      if (!spaceHeld) document.body.classList.remove('space-held');
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  }, true);
 
   document.addEventListener('keydown', e => {
     const cmd = e.metaKey || e.ctrlKey;
