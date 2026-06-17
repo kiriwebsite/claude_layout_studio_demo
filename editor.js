@@ -295,9 +295,64 @@
   function attachLineHandlers(el, line) {
     el.addEventListener('mousedown', e => {
       if (spaceHeld || addLineMode) return;
-      if (e.altKey) return; // let canvas alt-drag pass through
       e.preventDefault();
       e.stopPropagation();
+
+      // Alt+drag on a line = duplicate: spawn a new line of the same axis at the cursor
+      // (once movement exceeds threshold) and drag the new one. Original stays.
+      if (e.altKey) {
+        const axis = el.dataset.axis;
+        const cr = canvas.getBoundingClientRect();
+        const startX = e.clientX, startY = e.clientY;
+        let newLine = null, newEl = null;
+        let prevF = 0, nextF = 1;
+        const move = ev => {
+          if (!newLine) {
+            const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
+            const dist = axis === 'v' ? Math.abs(dx) : Math.abs(dy);
+            if (dist < 5) return;
+            const frac = axis === 'v'
+              ? (ev.clientX - cr.left) / cr.width
+              : (ev.clientY - cr.top) / cr.height;
+            newLine = _insertLine(axis, frac);
+            if (!newLine) return; // too close to an existing line — keep waiting
+            applyGridTracks();
+            reflowCanvas();
+            const arr = axis === 'v' ? vLines : hLines;
+            const idx = arr.indexOf(newLine);
+            prevF = idx > 0 ? arr[idx - 1].frac : 0;
+            nextF = idx < arr.length - 1 ? arr[idx + 1].frac : 1;
+            newEl = canvas.querySelector('.grid-line.' + axis + '[data-index="' + idx + '"]');
+          } else {
+            const frac = axis === 'v'
+              ? (ev.clientX - cr.left) / cr.width
+              : (ev.clientY - cr.top) / cr.height;
+            const eps = 0.005;
+            const clamped = Math.max(prevF + eps, Math.min(nextF - eps, frac));
+            newLine.frac = clamped;
+            if (newEl) {
+              if (axis === 'v') newEl.style.left = (clamped * 100) + '%';
+              else newEl.style.top = (clamped * 100) + '%';
+            }
+            applyGridTracks();
+          }
+        };
+        const up = () => {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+          if (newLine) {
+            selectLineOnly(newLine);
+            pushHistory();
+          } else {
+            // No drag distance — treat as plain click: select the original
+            selectLineOnly(line);
+          }
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+        return;
+      }
 
       if (e.shiftKey) {
         toggleLineSelection(line);
@@ -409,7 +464,6 @@
     dom.addEventListener('mousedown', e => {
       if (e.target.classList.contains('handle')) return;
       if (spaceHeld || addLineMode) return;
-      if (e.altKey) return; // let canvas alt-drag pass through
       e.preventDefault();
       e.stopPropagation();
 
@@ -470,7 +524,6 @@
 
     dom.querySelectorAll('.handle').forEach(handle => {
       handle.addEventListener('mousedown', e => {
-        if (e.altKey) return;
         e.preventDefault();
         e.stopPropagation();
         replaceItemSelection(item);
@@ -1027,68 +1080,8 @@
     return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
   }
 
-  // Alt+drag adds a line. Axis determined by which direction has more movement.
-  // This must run BEFORE the "e.target !== canvas" check so it fires even when the
-  // mousedown lands on an item or line.
-  function startAltDragAddLine(e) {
-    e.preventDefault();
-    if (e.stopPropagation) e.stopPropagation();
-    const cr = canvas.getBoundingClientRect();
-    const startX = e.clientX, startY = e.clientY;
-    let axis = null;
-    let line = null;
-    let lineEl = null;
-    let prev = 0, next = 1;
-    const move = ev => {
-      if (!axis) {
-        const dx = Math.abs(ev.clientX - startX);
-        const dy = Math.abs(ev.clientY - startY);
-        if (Math.max(dx, dy) < 5) return;
-        axis = dx >= dy ? 'v' : 'h';
-        const initialFrac = axis === 'v'
-          ? (startX - cr.left) / cr.width
-          : (startY - cr.top) / cr.height;
-        line = _insertLine(axis, initialFrac);
-        if (!line) { axis = null; return; }
-        const arr = axis === 'v' ? vLines : hLines;
-        const idx = arr.indexOf(line);
-        prev = idx > 0 ? arr[idx - 1].frac : 0;
-        next = idx < arr.length - 1 ? arr[idx + 1].frac : 1;
-        applyGridTracks();
-        reflowCanvas();
-        lineEl = canvas.querySelector('.grid-line.' + axis + '[data-index="' + idx + '"]');
-      } else {
-        const frac = axis === 'v'
-          ? (ev.clientX - cr.left) / cr.width
-          : (ev.clientY - cr.top) / cr.height;
-        const eps = 0.005;
-        const clamped = Math.max(prev + eps, Math.min(next - eps, frac));
-        line.frac = clamped;
-        if (lineEl) {
-          if (axis === 'v') lineEl.style.left = (clamped * 100) + '%';
-          else lineEl.style.top = (clamped * 100) + '%';
-        }
-        applyGridTracks();
-      }
-    };
-    const up = () => {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
-      if (line) {
-        selectLineOnly(line);
-        pushHistory();
-      }
-    };
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
-  }
-
   canvas.addEventListener('mousedown', e => {
     if (spaceHeld) return;
-    if (e.altKey && !addLineMode) {
-      startAltDragAddLine(e);
-      return;
-    }
     if (e.target !== canvas) return;
     const cr = canvas.getBoundingClientRect();
 
