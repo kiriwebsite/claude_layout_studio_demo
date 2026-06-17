@@ -26,6 +26,69 @@
     canvas.style.transform = (panX || panY) ? `translate(${panX}px, ${panY}px)` : '';
   }
 
+  // === IndexedDB 自動儲存 ===
+  const DB_NAME = 'LayoutStudioDB';
+  const DB_STORE = 'state';
+  let _saveTimer = null;
+  function _openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = e => e.target.result.createObjectStore(DB_STORE);
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+  async function saveStateToDB(snap) {
+    try {
+      const db = await _openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).put(snap, 'current');
+        tx.oncomplete = () => resolve();
+        tx.onerror = e => reject(e.target.error);
+      });
+      db.close();
+    } catch (err) {
+      console.warn('自動儲存失敗:', err);
+    }
+  }
+  async function loadStateFromDB() {
+    try {
+      const db = await _openDB();
+      const result = await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readonly');
+        const req = tx.objectStore(DB_STORE).get('current');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = e => reject(e.target.error);
+      });
+      db.close();
+      return result;
+    } catch (err) {
+      console.warn('讀取本機儲存失敗:', err);
+      return null;
+    }
+  }
+  async function clearStateFromDB() {
+    try {
+      const db = await _openDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).delete('current');
+        tx.oncomplete = () => resolve();
+        tx.onerror = e => reject(e.target.error);
+      });
+      db.close();
+    } catch (err) {
+      console.warn('清除儲存失敗:', err);
+    }
+  }
+  function debouncedSave() {
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(() => {
+      saveStateToDB(snapshot());
+    }, 500);
+  }
+
   const nodeMap = new Map();
   const ROOT_ID = 'root';
   let nextId = 1;
@@ -1490,6 +1553,7 @@
     if (history.length > 60) history.shift();
     historyIdx = history.length - 1;
     updateAllOverlays();
+    debouncedSave();
   }
   function undo() {
     if (historyIdx <= 0) return;
@@ -1577,6 +1641,31 @@
   document.getElementById('zoomOutBtn').addEventListener('click', () => setZoom(zoom / 1.25));
   document.getElementById('fitBtn').addEventListener('click', fitZoom);
   document.getElementById('undoBtn').addEventListener('click', undo);
+  document.getElementById('newBtn').addEventListener('click', async () => {
+    if (!confirm('確定要清空畫布並刪除本機儲存的工作嗎？')) return;
+    isRestoring = true;
+    canvas.querySelectorAll('.item, .group-container').forEach(el => el.remove());
+    selectedSet.clear();
+    selected = null;
+    clearGuides();
+    initTree();
+    bgDataUrl = null;
+    bgRatio = '16 / 9';
+    canvas.style.aspectRatio = bgRatio;
+    const bg = canvas.querySelector('.bg');
+    if (bg) bg.remove();
+    hint.style.display = '';
+    history = [];
+    historyIdx = -1;
+    imageCounter = 0;
+    groupCounter = 0;
+    nextId = 1;
+    rebuildLayerPanel();
+    rebuildProperties();
+    isRestoring = false;
+    await clearStateFromDB();
+    pushHistory();
+  });
   bgInput.addEventListener('change', e => {
     const file = e.target.files && e.target.files[0];
     if (file) setBackground(file);
@@ -1809,6 +1898,13 @@
   });
 
   applyZoom();
-  pushHistory();
-  console.log('Layout Studio ready');
+  // 啟動時嘗試載入上次儲存的狀態
+  loadStateFromDB().then(saved => {
+    if (saved && (saved.bgDataUrl || (saved.nodes && saved.nodes.some(n => n.id !== ROOT_ID)))) {
+      restoreSnapshot(saved);
+      console.log('已恢復上次的編輯狀態');
+    }
+    pushHistory();
+    console.log('Layout Studio ready');
+  });
 })();
