@@ -12,8 +12,9 @@
   <button id="bgBtn" type="button">設定底圖</button>
   <button id="addBtn" type="button">新增圖片</button>
   <div class="divider"></div>
-  <button id="groupBtn" type="button">群組</button>
-  <button id="ungroupBtn" type="button">解散</button>
+  <button id="addVLineBtn" type="button">加垂直線</button>
+  <button id="addHLineBtn" type="button">加水平線</button>
+  <div class="divider"></div>
   <button id="forwardBtn" type="button">上移</button>
   <button id="backwardBtn" type="button">下移</button>
   <button id="frontBtn" type="button">置頂</button>
@@ -37,14 +38,14 @@
       <div class="layer-empty">尚無圖片</div>
     </div>
     <div class="properties" id="properties" style="display:none">
-      <div class="properties-header">群組屬性</div>
+      <div class="properties-header">屬性</div>
       <div id="propertiesBody"></div>
     </div>
   </aside>
 
   <div class="stage" id="stage">
     <div class="canvas" id="canvas">
-      <div class="empty-hint" id="hint">請設定底圖,或直接把圖片拖進畫布</div>
+      <div class="empty-hint" id="hint">設定底圖或拖入圖片開始，並用「加垂直線/水平線」建立網格</div>
     </div>
   </div>
 </div>
