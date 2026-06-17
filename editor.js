@@ -10,6 +10,7 @@
   const propertiesBody = document.getElementById('propertiesBody');
   const addVLineBtn = document.getElementById('addVLineBtn');
   const addHLineBtn = document.getElementById('addHLineBtn');
+  const equalLinesBtn = document.getElementById('equalLinesBtn');
 
   // === State ===
   let bgDataUrl = null;
@@ -18,16 +19,20 @@
   let spaceHeld = false, isPanning = false;
   const BASE_WIDTH = 1280;
 
-  let vLines = []; // sorted ascending, fractions in (0, 1)
+  // Lines: array of { id, frac }, sorted by frac ascending
+  let vLines = [];
   let hLines = [];
+  let nextLineId = 1;
+  function makeLine(frac) { return { id: 'l-' + (nextLineId++), frac }; }
+
   // items[0] = top of layer panel = visually on top. Each: {id, src, name, col:[s,e], row:[s,e], dom}
   let items = [];
 
   const selectedItems = new Set();
   let primaryItem = null;
-  let selectedLine = null; // {axis:'v'|'h', index}
+  const selectedLines = new Set(); // Set of line objects
 
-  let addLineMode = null; // 'v' | 'h' | null
+  let addLineMode = null; // 'v' | 'h' | null  (from toolbar button)
   let clipboard = null;
   let history = [], historyIdx = -1, isRestoring = false;
   let nextId = 1;
@@ -101,7 +106,7 @@
 
   // === Grid tracks ===
   function trackWidths(lines) {
-    const pts = [0, ...lines, 1];
+    const pts = [0, ...lines.map(l => l.frac), 1];
     const out = [];
     for (let i = 1; i < pts.length; i++) out.push(pts[i] - pts[i - 1]);
     return out;
@@ -138,7 +143,6 @@
   }
   function reflowCanvas() {
     canvas.querySelectorAll('.item').forEach(el => el.remove());
-    // items[0] = top of panel = visually on top, so append in REVERSE so it ends up last in DOM
     items.slice().reverse().forEach(item => {
       if (!item.dom) item.dom = createItemDom(item);
       applyItemStyle(item);
@@ -153,85 +157,163 @@
     hint.style.display = (bgDataUrl || items.length > 0) ? 'none' : '';
   }
 
-  // === Lines ===
+  // === Lines: render ===
   function renderLines() {
     canvas.querySelectorAll('.grid-line').forEach(el => el.remove());
-    vLines.forEach((x, i) => {
+    vLines.forEach((line, i) => {
       const el = document.createElement('div');
       el.className = 'grid-line v';
-      el.style.left = (x * 100) + '%';
+      el.style.left = (line.frac * 100) + '%';
       el.dataset.axis = 'v';
       el.dataset.index = i;
-      if (selectedLine && selectedLine.axis === 'v' && selectedLine.index === i) el.classList.add('selected');
-      attachLineHandlers(el);
+      if (selectedLines.has(line)) el.classList.add('selected');
+      attachLineHandlers(el, line);
       canvas.appendChild(el);
     });
-    hLines.forEach((y, i) => {
+    hLines.forEach((line, i) => {
       const el = document.createElement('div');
       el.className = 'grid-line h';
-      el.style.top = (y * 100) + '%';
+      el.style.top = (line.frac * 100) + '%';
       el.dataset.axis = 'h';
       el.dataset.index = i;
-      if (selectedLine && selectedLine.axis === 'h' && selectedLine.index === i) el.classList.add('selected');
-      attachLineHandlers(el);
+      if (selectedLines.has(line)) el.classList.add('selected');
+      attachLineHandlers(el, line);
       canvas.appendChild(el);
     });
   }
+  function refreshLineSelectionUI() {
+    canvas.querySelectorAll('.grid-line').forEach(el => {
+      const axis = el.dataset.axis;
+      const idx = +el.dataset.index;
+      const lines = axis === 'v' ? vLines : hLines;
+      const line = lines[idx];
+      el.classList.toggle('selected', !!line && selectedLines.has(line));
+    });
+  }
 
-  function addLine(axis, frac) {
+  // === Lines: data ops ===
+  function _insertLine(axis, frac) {
     const lines = axis === 'v' ? vLines : hLines;
     frac = Math.max(0.01, Math.min(0.99, frac));
-    if (lines.some(v => Math.abs(v - frac) < 0.005)) return;
-    let pos = lines.findIndex(v => v > frac);
+    if (lines.some(l => Math.abs(l.frac - frac) < 0.005)) return null;
+    let pos = lines.findIndex(l => l.frac > frac);
     if (pos === -1) pos = lines.length;
-    lines.splice(pos, 0, frac);
-    // New grid line index = pos + 2 (1-indexed). Bump any item col/row that's >= that.
-    const newIdx = pos + 2;
-    items.forEach(item => {
+    const line = makeLine(frac);
+    lines.splice(pos, 0, line);
+    const newIdx = pos + 2; // 1-indexed grid line that was added
+    items.forEach(it => {
       const k = axis === 'v' ? 'col' : 'row';
-      if (item[k][0] >= newIdx) item[k][0]++;
-      if (item[k][1] >= newIdx) item[k][1]++;
+      if (it[k][0] >= newIdx) it[k][0]++;
+      if (it[k][1] >= newIdx) it[k][1]++;
     });
+    return line;
+  }
+  function addLine(axis, frac) {
+    const line = _insertLine(axis, frac);
+    if (!line) return null;
     applyGridTracks();
     reflowCanvas();
     pushHistory();
+    return line;
   }
-
-  function removeLine(axis, idx) {
+  function _removeLineData(line) {
+    let axis = 'v', idx = vLines.indexOf(line);
+    if (idx < 0) { axis = 'h'; idx = hLines.indexOf(line); }
+    if (idx < 0) return;
     const lines = axis === 'v' ? vLines : hLines;
-    if (idx < 0 || idx >= lines.length) return;
     lines.splice(idx, 1);
     const removed = idx + 2;
-    items.forEach(item => {
+    items.forEach(it => {
       const k = axis === 'v' ? 'col' : 'row';
       [0, 1].forEach(side => {
-        const v = item[k][side];
-        if (v > removed) item[k][side] = v - 1;
-        else if (v === removed) item[k][side] = removed - 1;
+        const v = it[k][side];
+        if (v > removed) it[k][side] = v - 1;
+        else if (v === removed) it[k][side] = removed - 1;
       });
-      if (item[k][0] >= item[k][1]) item[k][1] = item[k][0] + 1;
+      if (it[k][0] >= it[k][1]) it[k][1] = it[k][0] + 1;
     });
-    selectedLine = null;
+    selectedLines.delete(line);
+  }
+  function removeSelectedLines() {
+    if (selectedLines.size === 0) return;
+    Array.from(selectedLines).forEach(_removeLineData);
+    selectedLines.clear();
     applyGridTracks();
     reflowCanvas();
     rebuildProperties();
     pushHistory();
   }
+  function distributeLinesEvenly() {
+    let changed = false;
+    if (vLines.length > 0) {
+      const n = vLines.length;
+      vLines.forEach((l, i) => {
+        const target = (i + 1) / (n + 1);
+        if (Math.abs(l.frac - target) > 0.0001) { l.frac = target; changed = true; }
+      });
+    }
+    if (hLines.length > 0) {
+      const n = hLines.length;
+      hLines.forEach((l, i) => {
+        const target = (i + 1) / (n + 1);
+        if (Math.abs(l.frac - target) > 0.0001) { l.frac = target; changed = true; }
+      });
+    }
+    if (!changed) return;
+    applyGridTracks();
+    renderLines();
+    rebuildProperties();
+    pushHistory();
+  }
 
-  function attachLineHandlers(el) {
-    const axis = el.dataset.axis;
-    const index = +el.dataset.index;
+  // === Lines: selection ===
+  function selectLineOnly(line) {
+    selectedLines.clear();
+    selectedLines.add(line);
+    clearItemSelection(false);
+    refreshLineSelectionUI();
+    rebuildLayerPanel();
+    rebuildProperties();
+  }
+  function addLineSelection(line) {
+    selectedLines.add(line);
+    refreshLineSelectionUI();
+    rebuildProperties();
+  }
+  function toggleLineSelection(line) {
+    if (selectedLines.has(line)) selectedLines.delete(line);
+    else selectedLines.add(line);
+    refreshLineSelectionUI();
+    rebuildProperties();
+  }
+  function clearLineSelection() {
+    selectedLines.clear();
+    refreshLineSelectionUI();
+  }
+
+  // === Lines: drag handlers ===
+  function attachLineHandlers(el, line) {
     el.addEventListener('mousedown', e => {
       if (spaceHeld || addLineMode) return;
+      if (e.altKey) return; // let canvas alt-drag pass through
       e.preventDefault();
       e.stopPropagation();
-      selectLine(axis, index);
 
+      if (e.shiftKey) {
+        toggleLineSelection(line);
+        return;
+      }
+      if (!selectedLines.has(line)) {
+        selectLineOnly(line);
+      }
+
+      const axis = el.dataset.axis;
       const lines = axis === 'v' ? vLines : hLines;
+      const idx = lines.indexOf(line);
       const cr = canvas.getBoundingClientRect();
-      const startVal = lines[index];
-      const prev = index > 0 ? lines[index - 1] : 0;
-      const next = index < lines.length - 1 ? lines[index + 1] : 1;
+      const startVal = line.frac;
+      const prev = idx > 0 ? lines[idx - 1].frac : 0;
+      const next = idx < lines.length - 1 ? lines[idx + 1].frac : 1;
       const eps = 0.005;
       let moved = false;
       const move = ev => {
@@ -240,7 +322,7 @@
           : (ev.clientY - cr.top) / cr.height;
         const clamped = Math.max(prev + eps, Math.min(next - eps, frac));
         if (Math.abs(clamped - startVal) > 0.001) moved = true;
-        lines[index] = clamped;
+        line.frac = clamped;
         if (axis === 'v') el.style.left = (clamped * 100) + '%';
         else el.style.top = (clamped * 100) + '%';
         applyGridTracks();
@@ -254,20 +336,6 @@
       document.addEventListener('mousemove', move);
       document.addEventListener('mouseup', up);
     });
-  }
-
-  function selectLine(axis, index) {
-    selectedLine = { axis, index };
-    clearItemSelection(false);
-    canvas.querySelectorAll('.grid-line').forEach(el => {
-      el.classList.toggle('selected', el.dataset.axis === axis && +el.dataset.index === index);
-    });
-    rebuildLayerPanel();
-    rebuildProperties();
-  }
-  function clearLineSelection() {
-    selectedLine = null;
-    canvas.querySelectorAll('.grid-line').forEach(el => el.classList.remove('selected'));
   }
 
   // === Items: selection ===
@@ -324,9 +392,8 @@
 
   // === Cell math ===
   function cellFromPoint(x, y) {
-    // x,y in canvas-local fractions [0,1]. Returns 1-indexed (col, row).
-    const xs = [0, ...vLines, 1];
-    const ys = [0, ...hLines, 1];
+    const xs = [0, ...vLines.map(l => l.frac), 1];
+    const ys = [0, ...hLines.map(l => l.frac), 1];
     let col = xs.length - 1, row = ys.length - 1;
     for (let i = 1; i < xs.length; i++) {
       if (x < xs[i]) { col = i; break; }
@@ -342,6 +409,7 @@
     dom.addEventListener('mousedown', e => {
       if (e.target.classList.contains('handle')) return;
       if (spaceHeld || addLineMode) return;
+      if (e.altKey) return; // let canvas alt-drag pass through
       e.preventDefault();
       e.stopPropagation();
 
@@ -402,6 +470,7 @@
 
     dom.querySelectorAll('.handle').forEach(handle => {
       handle.addEventListener('mousedown', e => {
+        if (e.altKey) return;
         e.preventDefault();
         e.stopPropagation();
         replaceItemSelection(item);
@@ -455,17 +524,27 @@
     return item;
   }
 
-  function deleteSelected() {
-    if (selectedItems.size === 0) return;
-    items = items.filter(it => {
-      if (selectedItems.has(it)) {
-        if (it.dom) it.dom.remove();
-        return false;
-      }
-      return true;
-    });
-    selectedItems.clear();
-    primaryItem = null;
+  function deleteAnySelected() {
+    const hadLines = selectedLines.size > 0;
+    const hadItems = selectedItems.size > 0;
+    if (!hadLines && !hadItems) return;
+    if (hadLines) {
+      Array.from(selectedLines).forEach(_removeLineData);
+      selectedLines.clear();
+    }
+    if (hadItems) {
+      items = items.filter(it => {
+        if (selectedItems.has(it)) {
+          if (it.dom) it.dom.remove();
+          return false;
+        }
+        return true;
+      });
+      selectedItems.clear();
+      primaryItem = null;
+    }
+    applyGridTracks();
+    reflowCanvas();
     rebuildLayerPanel();
     rebuildProperties();
     updateHintVisibility();
@@ -588,50 +667,54 @@
     propertiesBody.innerHTML = '';
     const header = propertiesPanel.querySelector('.properties-header');
 
-    if (selectedLine) {
-      const lines = selectedLine.axis === 'v' ? vLines : hLines;
-      const idx = selectedLine.index;
-      const cur = lines[idx];
-      if (cur == null) { propertiesPanel.style.display = 'none'; return; }
+    if (selectedLines.size > 0) {
       propertiesPanel.style.display = 'block';
-      if (header) header.textContent = selectedLine.axis === 'v' ? '垂直線屬性' : '水平線屬性';
+      if (selectedLines.size === 1) {
+        const line = selectedLines.values().next().value;
+        const axis = vLines.indexOf(line) >= 0 ? 'v' : 'h';
+        const lines = axis === 'v' ? vLines : hLines;
+        const idx = lines.indexOf(line);
+        if (header) header.textContent = axis === 'v' ? '垂直線屬性' : '水平線屬性';
 
-      const posRow = document.createElement('div');
-      posRow.className = 'prop-row';
-      const lbl = document.createElement('div');
-      lbl.className = 'prop-label';
-      lbl.textContent = '位置 (% of canvas)';
-      posRow.appendChild(lbl);
-      const wrap = document.createElement('div');
-      wrap.className = 'prop-inline';
-      const input = document.createElement('input');
-      input.type = 'number'; input.className = 'prop-input';
-      input.step = '0.5'; input.min = '1'; input.max = '99';
-      input.value = (cur * 100).toFixed(2).replace(/\.?0+$/, '');
-      input.addEventListener('input', () => {
-        const v = parseFloat(input.value);
-        if (isNaN(v)) return;
-        const prev = idx > 0 ? lines[idx - 1] : 0;
-        const next = idx < lines.length - 1 ? lines[idx + 1] : 1;
-        const eps = 0.005;
-        lines[idx] = Math.max(prev + eps, Math.min(next - eps, v / 100));
-        applyGridTracks();
-        renderLines();
-      });
-      input.addEventListener('change', () => pushHistory());
-      wrap.appendChild(input);
-      const suf = document.createElement('span');
-      suf.className = 'prop-suffix'; suf.textContent = '%';
-      wrap.appendChild(suf);
-      posRow.appendChild(wrap);
-      propertiesBody.appendChild(posRow);
+        const posRow = document.createElement('div');
+        posRow.className = 'prop-row';
+        const lbl = document.createElement('div');
+        lbl.className = 'prop-label';
+        lbl.textContent = '位置 (% of canvas)';
+        posRow.appendChild(lbl);
+        const wrap = document.createElement('div');
+        wrap.className = 'prop-inline';
+        const input = document.createElement('input');
+        input.type = 'number'; input.className = 'prop-input';
+        input.step = '0.5'; input.min = '1'; input.max = '99';
+        input.value = (line.frac * 100).toFixed(2).replace(/\.?0+$/, '');
+        input.addEventListener('input', () => {
+          const v = parseFloat(input.value);
+          if (isNaN(v)) return;
+          const prev = idx > 0 ? lines[idx - 1].frac : 0;
+          const next = idx < lines.length - 1 ? lines[idx + 1].frac : 1;
+          const eps = 0.005;
+          line.frac = Math.max(prev + eps, Math.min(next - eps, v / 100));
+          applyGridTracks();
+          renderLines();
+        });
+        input.addEventListener('change', () => pushHistory());
+        wrap.appendChild(input);
+        const suf = document.createElement('span');
+        suf.className = 'prop-suffix'; suf.textContent = '%';
+        wrap.appendChild(suf);
+        posRow.appendChild(wrap);
+        propertiesBody.appendChild(posRow);
+      } else {
+        if (header) header.textContent = '已選 ' + selectedLines.size + ' 條線';
+      }
 
       const delRow = document.createElement('div');
       delRow.className = 'prop-row';
       const delBtn = document.createElement('button');
-      delBtn.textContent = '刪除此線';
+      delBtn.textContent = selectedLines.size === 1 ? '刪除此線' : '刪除 ' + selectedLines.size + ' 條線';
       delBtn.className = 'prop-btn-danger';
-      delBtn.addEventListener('click', () => removeLine(selectedLine.axis, selectedLine.index));
+      delBtn.addEventListener('click', removeSelectedLines);
       delRow.appendChild(delBtn);
       propertiesBody.appendChild(delRow);
       return;
@@ -721,7 +804,7 @@
     return idx > 0 ? n.substring(0, idx) : n;
   }
 
-  // === Z-order (layer panel reorder) ===
+  // === Z-order ===
   function moveSelectedInList(dir) {
     if (!primaryItem) return false;
     const idx = items.indexOf(primaryItem);
@@ -792,15 +875,15 @@
   // === History & persistence ===
   function snapshot() {
     return {
-      schema: 'grid-v1',
+      schema: 'grid-v2',
       bgDataUrl, bgRatio,
-      vLines: vLines.slice(),
-      hLines: hLines.slice(),
+      vLines: vLines.map(l => ({ id: l.id, frac: l.frac })),
+      hLines: hLines.map(l => ({ id: l.id, frac: l.frac })),
       items: items.map(it => ({
         id: it.id, src: it.src, name: it.name,
         col: it.col.slice(), row: it.row.slice()
       })),
-      nextId, imageCounter
+      nextId, imageCounter, nextLineId
     };
   }
   function pushHistory() {
@@ -817,18 +900,28 @@
     restoreSnapshot(history[historyIdx]);
   }
   function restoreSnapshot(snap) {
-    if (!snap || snap.schema !== 'grid-v1') return;
+    if (!snap) return;
+    if (snap.schema !== 'grid-v1' && snap.schema !== 'grid-v2') return;
     isRestoring = true;
     canvas.querySelectorAll('.item, .grid-line').forEach(el => el.remove());
     items = [];
     selectedItems.clear();
     primaryItem = null;
-    selectedLine = null;
+    selectedLines.clear();
 
-    vLines = (snap.vLines || []).slice();
-    hLines = (snap.hLines || []).slice();
+    // Convert legacy (grid-v1: array of numbers) or current (grid-v2: array of objects)
+    function normLines(arr) {
+      return (arr || []).map(l => {
+        if (typeof l === 'number') return makeLine(l);
+        if (l && typeof l.frac === 'number') return { id: l.id || ('l-' + (nextLineId++)), frac: l.frac };
+        return null;
+      }).filter(Boolean);
+    }
+    vLines = normLines(snap.vLines);
+    hLines = normLines(snap.hLines);
     nextId = snap.nextId || 1;
     imageCounter = snap.imageCounter || 0;
+    if (snap.nextLineId) nextLineId = Math.max(nextLineId, snap.nextLineId);
 
     if (snap.bgDataUrl) {
       bgDataUrl = snap.bgDataUrl;
@@ -861,7 +954,7 @@
     isRestoring = false;
   }
 
-  // === Add-line mode ===
+  // === Add-line mode (toolbar buttons) ===
   function enterAddLineMode(axis) {
     addLineMode = axis;
     document.body.classList.add('add-line-mode');
@@ -886,10 +979,8 @@
     if (addLineMode === 'h') exitAddLineMode();
     else enterAddLineMode('h');
   });
-  document.getElementById('delBtn').addEventListener('click', () => {
-    if (selectedLine) removeLine(selectedLine.axis, selectedLine.index);
-    else deleteSelected();
-  });
+  equalLinesBtn.addEventListener('click', distributeLinesEvenly);
+  document.getElementById('delBtn').addEventListener('click', deleteAnySelected);
   document.getElementById('forwardBtn').addEventListener('click', bringForward);
   document.getElementById('backwardBtn').addEventListener('click', sendBackward);
   document.getElementById('frontBtn').addEventListener('click', bringToFront);
@@ -903,12 +994,12 @@
     isRestoring = true;
     canvas.querySelectorAll('.item, .grid-line').forEach(el => el.remove());
     items = []; vLines = []; hLines = [];
-    selectedItems.clear(); primaryItem = null; selectedLine = null;
+    selectedItems.clear(); primaryItem = null; selectedLines.clear();
     bgDataUrl = null; bgRatio = '16 / 9';
     canvas.style.aspectRatio = bgRatio;
     const bg = canvas.querySelector('.bg'); if (bg) bg.remove();
     history = []; historyIdx = -1;
-    imageCounter = 0; nextId = 1;
+    imageCounter = 0; nextId = 1; nextLineId = 1;
     applyGridTracks();
     rebuildLayerPanel();
     rebuildProperties();
@@ -936,9 +1027,69 @@
     return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
   }
 
+  // Alt+drag adds a line. Axis determined by which direction has more movement.
+  // This must run BEFORE the "e.target !== canvas" check so it fires even when the
+  // mousedown lands on an item or line.
+  function startAltDragAddLine(e) {
+    e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    const cr = canvas.getBoundingClientRect();
+    const startX = e.clientX, startY = e.clientY;
+    let axis = null;
+    let line = null;
+    let lineEl = null;
+    let prev = 0, next = 1;
+    const move = ev => {
+      if (!axis) {
+        const dx = Math.abs(ev.clientX - startX);
+        const dy = Math.abs(ev.clientY - startY);
+        if (Math.max(dx, dy) < 5) return;
+        axis = dx >= dy ? 'v' : 'h';
+        const initialFrac = axis === 'v'
+          ? (startX - cr.left) / cr.width
+          : (startY - cr.top) / cr.height;
+        line = _insertLine(axis, initialFrac);
+        if (!line) { axis = null; return; }
+        const arr = axis === 'v' ? vLines : hLines;
+        const idx = arr.indexOf(line);
+        prev = idx > 0 ? arr[idx - 1].frac : 0;
+        next = idx < arr.length - 1 ? arr[idx + 1].frac : 1;
+        applyGridTracks();
+        reflowCanvas();
+        lineEl = canvas.querySelector('.grid-line.' + axis + '[data-index="' + idx + '"]');
+      } else {
+        const frac = axis === 'v'
+          ? (ev.clientX - cr.left) / cr.width
+          : (ev.clientY - cr.top) / cr.height;
+        const eps = 0.005;
+        const clamped = Math.max(prev + eps, Math.min(next - eps, frac));
+        line.frac = clamped;
+        if (lineEl) {
+          if (axis === 'v') lineEl.style.left = (clamped * 100) + '%';
+          else lineEl.style.top = (clamped * 100) + '%';
+        }
+        applyGridTracks();
+      }
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      if (line) {
+        selectLineOnly(line);
+        pushHistory();
+      }
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  }
+
   canvas.addEventListener('mousedown', e => {
-    if (e.target !== canvas) return;
     if (spaceHeld) return;
+    if (e.altKey && !addLineMode) {
+      startAltDragAddLine(e);
+      return;
+    }
+    if (e.target !== canvas) return;
     const cr = canvas.getBoundingClientRect();
 
     if (addLineMode) {
@@ -958,7 +1109,7 @@
       rebuildProperties();
     }
 
-    // Rubber-band selection
+    // Rubber-band selection over items and lines
     const startX = e.clientX, startY = e.clientY;
     let rubber = null;
     const move = ev => {
@@ -982,11 +1133,24 @@
       document.removeEventListener('mouseup', up);
       if (rubber) {
         const rR = rubber.getBoundingClientRect();
+        const cr2 = canvas.getBoundingClientRect();
+        const fL = (rR.left - cr2.left) / cr2.width;
+        const fR_ = (rR.right - cr2.left) / cr2.width;
+        const fT = (rR.top - cr2.top) / cr2.height;
+        const fB = (rR.bottom - cr2.top) / cr2.height;
         items.forEach(it => {
           if (it.dom && rectsIntersect(rR, it.dom.getBoundingClientRect())) {
             addItemSelection(it, true);
           }
         });
+        vLines.forEach(line => {
+          if (line.frac >= fL && line.frac <= fR_) selectedLines.add(line);
+        });
+        hLines.forEach(line => {
+          if (line.frac >= fT && line.frac <= fB) selectedLines.add(line);
+        });
+        refreshLineSelectionUI();
+        rebuildProperties();
         rubber.remove();
       }
     };
@@ -1074,10 +1238,9 @@
       clearLineSelection();
       rebuildLayerPanel();
       rebuildProperties();
-    } else if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedItems.size > 0 || selectedLine)) {
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedItems.size > 0 || selectedLines.size > 0)) {
       e.preventDefault();
-      if (selectedLine) removeLine(selectedLine.axis, selectedLine.index);
-      else deleteSelected();
+      deleteAnySelected();
     } else if (cmd && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault(); undo();
     } else if (cmd && (e.key === 'c' || e.key === 'C')) {
@@ -1151,7 +1314,8 @@
   applyGridTracks();
   updateHintVisibility();
   loadStateFromDB().then(saved => {
-    if (saved && saved.schema === 'grid-v1' && (saved.bgDataUrl || (saved.items && saved.items.length))) {
+    if (saved && (saved.schema === 'grid-v1' || saved.schema === 'grid-v2') &&
+        (saved.bgDataUrl || (saved.items && saved.items.length) || (saved.vLines && saved.vLines.length) || (saved.hLines && saved.hLines.length))) {
       restoreSnapshot(saved);
       console.log('已恢復上次的編輯狀態');
     }
