@@ -11,6 +11,7 @@
   <span class="brand">Layout Studio</span>
   <button id="bgBtn" type="button">設定底圖</button>
   <button id="addBtn" type="button">新增圖片</button>
+  <button id="autoLayoutBtn" type="button">自動拼版</button>
   <div class="divider"></div>
   <button id="groupBtn" type="button">群組</button>
   <button id="ungroupBtn" type="button">解散</button>
@@ -51,6 +52,30 @@
 <input type="file" id="bgInput" accept="image/*" style="display:none">
 <input type="file" id="addInput" accept="image/*" multiple style="display:none">
 
+<div id="autoLayoutModal" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-title">自動拼版</div>
+    <div class="modal-desc">上傳網頁參考圖和切圖 ZIP，系統會用模板匹配自動找到每張切圖在參考圖上的位置。</div>
+    <div class="modal-row">
+      <label class="modal-label">1. 參考圖（網頁完成示意圖）</label>
+      <input type="file" id="refInput" accept="image/*" class="modal-file">
+    </div>
+    <div class="modal-row">
+      <label class="modal-label">2. 切圖 ZIP</label>
+      <input type="file" id="sliceZipInput" accept=".zip" class="modal-file">
+    </div>
+    <div class="modal-progress" id="autoProgress" style="display:none">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="autoLayoutCancel" type="button">取消</button>
+      <button id="autoLayoutStart" type="button" class="primary">開始匹配</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="editor.js"></script>
 </body>
 </html>

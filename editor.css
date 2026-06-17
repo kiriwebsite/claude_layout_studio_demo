@@ -235,3 +235,94 @@
     display: flex; align-items: center; justify-content: center;
     color: #a8a08b; font-size: 16px; pointer-events: none;
   }
+
+  /* === 自動拼版對話框 === */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(31, 29, 26, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .modal-content {
+    background: #ffffff;
+    padding: 28px;
+    border-radius: 14px;
+    width: 480px;
+    max-width: 90vw;
+    box-shadow: 0 12px 40px rgba(31, 29, 26, 0.25);
+  }
+  .modal-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .modal-desc {
+    font-size: 12px;
+    color: #8a826f;
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+  .modal-row { margin: 14px 0; }
+  .modal-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: #5a5650;
+    margin-bottom: 6px;
+  }
+  .modal-file {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid #e3ddd0;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .modal-progress { margin-top: 18px; }
+  .progress-bar {
+    height: 6px;
+    background: #ededed;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: #1f1d1a;
+    transition: width 0.2s ease;
+  }
+  .progress-text {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #5a5650;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 22px;
+  }
+  .modal-actions button {
+    padding: 8px 16px;
+    background: #fff;
+    color: #3a3733;
+    border: 1px solid #e3ddd0;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+  }
+  .modal-actions button.primary {
+    background: #1f1d1a;
+    color: #fff;
+    border-color: #1f1d1a;
+  }
+  .modal-actions button:hover { background: #ededed; }
+  .modal-actions button.primary:hover { background: #3a3733; }
+  .modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .canvas .item.low-confidence { outline: 2px dashed #ff6b35; outline-offset: 2px; }

@@ -1808,6 +1808,290 @@
     URL.revokeObjectURL(url);
   });
 
+  // === 自動拼版：模板匹配 ===
+  function loadImageFromUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('圖片載入失敗'));
+      img.src = url;
+    });
+  }
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = ev => resolve(ev.target.result);
+      r.onerror = () => reject(new Error('FileReader 讀檔失敗'));
+      r.readAsDataURL(blob);
+    });
+  }
+  // 共用 canvas 避免反覆建立造成記憶體爆炸
+  const _tmpCanvasA = document.createElement('canvas');
+  const _tmpCanvasB = document.createElement('canvas');
+  const _tmpCtxA = _tmpCanvasA.getContext('2d');
+  const _tmpCtxB = _tmpCanvasB.getContext('2d');
+  function imageToImageData(img, maxW) {
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (maxW && w > maxW) {
+      const scale = maxW / w;
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
+    _tmpCanvasA.width = w; _tmpCanvasA.height = h;
+    _tmpCtxA.clearRect(0, 0, w, h);
+    _tmpCtxA.drawImage(img, 0, 0, w, h);
+    return _tmpCtxA.getImageData(0, 0, w, h);
+  }
+  function downsampleImageData(imgData, factor) {
+    const w = Math.floor(imgData.width / factor);
+    const h = Math.floor(imgData.height / factor);
+    _tmpCanvasA.width = imgData.width; _tmpCanvasA.height = imgData.height;
+    _tmpCtxA.clearRect(0, 0, imgData.width, imgData.height);
+    _tmpCtxA.putImageData(imgData, 0, 0);
+    _tmpCanvasB.width = w; _tmpCanvasB.height = h;
+    _tmpCtxB.clearRect(0, 0, w, h);
+    _tmpCtxB.drawImage(_tmpCanvasA, 0, 0, w, h);
+    return _tmpCtxB.getImageData(0, 0, w, h);
+  }
+  function computeSSD(ref, slice, ox, oy) {
+    const refW = ref.width;
+    const sw = slice.width, sh = slice.height;
+    const rp = ref.data, sp = slice.data;
+    let sum = 0, count = 0;
+    for (let y = 0; y < sh; y++) {
+      const refRow = (oy + y) * refW;
+      const sliceRow = y * sw;
+      for (let x = 0; x < sw; x++) {
+        const ri = (refRow + ox + x) * 4;
+        const si = (sliceRow + x) * 4;
+        // 跳過透明像素
+        if (sp[si + 3] < 128) continue;
+        const dr = rp[ri] - sp[si];
+        const dg = rp[ri + 1] - sp[si + 1];
+        const db = rp[ri + 2] - sp[si + 2];
+        sum += dr * dr + dg * dg + db * db;
+        count++;
+      }
+    }
+    return count > 0 ? sum / count : Infinity;
+  }
+  function matchTemplate(ref, slice, precomputedRefDs) {
+    // 1) 降採樣加速粗找
+    const ds = 4;
+    const refDs = precomputedRefDs || downsampleImageData(ref, ds);
+    const sliceDs = downsampleImageData(slice, ds);
+    const sw = sliceDs.width, sh = sliceDs.height;
+    let bestX = 0, bestY = 0, bestScore = Infinity;
+    const maxY = refDs.height - sh, maxX = refDs.width - sw;
+    for (let y = 0; y <= maxY; y++) {
+      for (let x = 0; x <= maxX; x++) {
+        const s = computeSSD(refDs, sliceDs, x, y);
+        if (s < bestScore) { bestScore = s; bestX = x; bestY = y; }
+      }
+    }
+    // 2) 全解析度微調 ±ds
+    const cx = bestX * ds, cy = bestY * ds;
+    let refinedX = cx, refinedY = cy, refinedScore = Infinity;
+    const sw2 = slice.width, sh2 = slice.height;
+    const maxY2 = ref.height - sh2, maxX2 = ref.width - sw2;
+    for (let dy = -ds; dy <= ds; dy++) {
+      for (let dx = -ds; dx <= ds; dx++) {
+        const x = cx + dx, y = cy + dy;
+        if (x < 0 || y < 0 || x > maxX2 || y > maxY2) continue;
+        const s = computeSSD(ref, slice, x, y);
+        if (s < refinedScore) { refinedScore = s; refinedX = x; refinedY = y; }
+      }
+    }
+    // refinedScore 現在是「每像素平均 SSD」
+    const avgSSD = refinedScore;
+    // 信心度：0 = 完美匹配，>3000 視為低信心
+    const confidence = Math.max(0, 1 - avgSSD / 3000);
+    return { x: refinedX, y: refinedY, w: sw2, h: sh2, confidence: confidence };
+  }
+
+  const autoLayoutBtn = document.getElementById('autoLayoutBtn');
+  const autoLayoutModal = document.getElementById('autoLayoutModal');
+  const autoLayoutCancel = document.getElementById('autoLayoutCancel');
+  const autoLayoutStart = document.getElementById('autoLayoutStart');
+  const refInput = document.getElementById('refInput');
+  const sliceZipInput = document.getElementById('sliceZipInput');
+  const autoProgress = document.getElementById('autoProgress');
+  const progressFill = document.getElementById('progressFill');
+  const progressText = document.getElementById('progressText');
+
+  autoLayoutBtn.addEventListener('click', () => {
+    refInput.value = ''; sliceZipInput.value = '';
+    autoProgress.style.display = 'none';
+    autoLayoutStart.disabled = false;
+    autoLayoutCancel.disabled = false;
+    autoLayoutModal.style.display = 'flex';
+  });
+  autoLayoutCancel.addEventListener('click', () => {
+    autoLayoutModal.style.display = 'none';
+  });
+
+  async function runAutoLayout() {
+    const refFile = refInput.files && refInput.files[0];
+    const zipFile = sliceZipInput.files && sliceZipInput.files[0];
+    if (!refFile || !zipFile) {
+      alert('請先上傳參考圖和 ZIP 檔');
+      return;
+    }
+    if (typeof JSZip === 'undefined') {
+      alert('JSZip 還沒載入，請等網路載入完成再試');
+      return;
+    }
+    autoLayoutStart.disabled = true;
+    autoLayoutCancel.disabled = true;
+    autoProgress.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressText.textContent = '載入參考圖中...';
+
+    try {
+      // 1) 設定參考圖為底圖
+      const refDataUrl = await blobToDataUrl(refFile);
+      const refImg = await loadImageFromUrl(refDataUrl);
+      bgRatio = refImg.naturalWidth + ' / ' + refImg.naturalHeight;
+      canvas.style.aspectRatio = bgRatio;
+      bgDataUrl = refDataUrl;
+      let bg = canvas.querySelector('.bg');
+      if (!bg) {
+        bg = document.createElement('img');
+        bg.className = 'bg';
+        canvas.insertBefore(bg, canvas.firstChild);
+      }
+      bg.src = bgDataUrl;
+      hint.style.display = 'none';
+
+      progressText.textContent = '解壓 ZIP 檔...';
+      // 2) 解壓 ZIP，過濾出圖片（排除 __MACOSX 和 ._ 開頭的 macOS 垃圾檔）
+      const zip = await JSZip.loadAsync(zipFile);
+      const entries = [];
+      zip.forEach((path, file) => {
+        if (file.dir) return;
+        if (path.startsWith('__MACOSX/')) return;
+        const fname = path.split('/').pop();
+        if (fname.startsWith('._')) return;
+        if (!/\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(path)) return;
+        entries.push({ path, file });
+      });
+      if (entries.length === 0) {
+        alert('ZIP 內沒有可用的圖片');
+        autoLayoutStart.disabled = false;
+        autoLayoutCancel.disabled = false;
+        return;
+      }
+      console.log(`過濾後找到 ${entries.length} 張可用切圖`);
+
+      // 3) 參考圖縮成最寬 1200px 加速匹配（記住縮放比，最後再換算）
+      const MATCH_MAX_W = 1200;
+      const refScale = refImg.naturalWidth > MATCH_MAX_W ? MATCH_MAX_W / refImg.naturalWidth : 1;
+      const refData = imageToImageData(refImg, MATCH_MAX_W);
+      // 預先降採樣 ref（只算一次，所有 slice 共用，避免每張都重新算造成記憶體爆掉）
+      const refDs = downsampleImageData(refData, 4);
+
+      // === 自動偵測 PSD slice 縮放比例 ===
+      const scaleCandidates = [1.0, 0.5, 0.333, 0.25];
+      const sampleSize = Math.min(5, entries.length);
+      progressText.textContent = `偵測切圖縮放比例中 (前 ${sampleSize} 張試 ${scaleCandidates.length} 種比例)...`;
+      const scaleVotes = {};
+      for (let i = 0; i < sampleSize; i++) {
+        const ent = entries[i];
+        progressFill.style.width = ((i / sampleSize) * 20) + '%';
+        try {
+          const blob = await ent.file.async('blob');
+          const sliceUrl = await blobToDataUrl(blob);
+          const sliceImg = await loadImageFromUrl(sliceUrl);
+          if (sliceImg.naturalWidth === 0) continue;
+          let bestSc = null, bestConf = 0;
+          for (const sc of scaleCandidates) {
+            const tw = Math.max(1, Math.round(sliceImg.naturalWidth * sc * refScale));
+            if (tw < 4) continue;
+            const sd = imageToImageData(sliceImg, tw);
+            if (sd.width < 4 || sd.height < 4) continue;
+            if (sd.width > refData.width || sd.height > refData.height) continue;
+            await new Promise(r => setTimeout(r, 0));
+            const m = matchTemplate(refData, sd, refDs);
+            if (m.confidence > bestConf) { bestConf = m.confidence; bestSc = sc; }
+          }
+          if (bestSc !== null && bestConf > 0.3) {
+            scaleVotes[bestSc] = (scaleVotes[bestSc] || 0) + bestConf;
+            console.log(`Sample ${ent.path}: best scale = ${bestSc}, confidence = ${(bestConf * 100).toFixed(0)}%`);
+          }
+        } catch (e) {
+          console.warn('Sample 失敗:', ent.path, e);
+        }
+      }
+      let dominantScale = 1.0;
+      let maxVotes = 0;
+      for (const k of Object.keys(scaleVotes)) {
+        if (scaleVotes[k] > maxVotes) { maxVotes = scaleVotes[k]; dominantScale = parseFloat(k); }
+      }
+      console.log('=== 偵測完成，使用縮放比例:', dominantScale, '===');
+
+      // === 用偵測到的 scale 跑全部 slices ===
+      let lowConfCount = 0;
+      let skipCount = 0;
+      let placedCount = 0;
+      for (let i = 0; i < entries.length; i++) {
+        const ent = entries[i];
+        progressText.textContent = `匹配中 ${i + 1}/${entries.length} (scale ${dominantScale})：${ent.path}`;
+        progressFill.style.width = (20 + (i + 1) / entries.length * 80) + '%';
+        try {
+          const blob = await ent.file.async('blob');
+          const sliceUrl = await blobToDataUrl(blob);
+          const sliceImg = await loadImageFromUrl(sliceUrl);
+          if (sliceImg.naturalWidth === 0 || sliceImg.naturalHeight === 0) {
+            console.warn('Slice 尺寸為 0，跳過:', ent.path);
+            skipCount++;
+            continue;
+          }
+          const targetW = Math.max(1, Math.round(sliceImg.naturalWidth * dominantScale * refScale));
+          const sliceData = imageToImageData(sliceImg, targetW);
+          if (sliceData.width < 4 || sliceData.height < 4) {
+            console.warn('Slice 太小（降採樣後 <4px），跳過:', ent.path);
+            skipCount++;
+            continue;
+          }
+          if (sliceData.width > refData.width || sliceData.height > refData.height) {
+            console.warn('Slice 比參考圖還大，跳過:', ent.path);
+            skipCount++;
+            continue;
+          }
+          await new Promise(r => setTimeout(r, 0));
+          const m = matchTemplate(refData, sliceData, refDs);
+          const origX = m.x / refScale;
+          const origY = m.y / refScale;
+          const origW = sliceImg.naturalWidth * dominantScale;
+          const xPct = (origX / refImg.naturalWidth) * 100;
+          const yPct = (origY / refImg.naturalHeight) * 100;
+          const wPct = (origW / refImg.naturalWidth) * 100;
+          const name = ent.path.replace(/^.*\//, '').replace(/\.[^.]+$/, '');
+          const dom = addItem(sliceUrl, xPct, yPct, wPct, name);
+          placedCount++;
+          if (m.confidence < 0.5) {
+            dom.classList.add('low-confidence');
+            lowConfCount++;
+            console.warn(`低信心：${name} (${(m.confidence * 100).toFixed(0)}%)`);
+          }
+        } catch (err) {
+          console.warn('單張處理失敗，跳過:', ent.path, err);
+          skipCount++;
+        }
+      }
+
+      progressText.textContent = `完成 (scale=${dominantScale})。放置 ${placedCount}、跳過 ${skipCount}${lowConfCount ? `、低信心 ${lowConfCount}` : ''}`;
+      setTimeout(() => { autoLayoutModal.style.display = 'none'; }, 3000);
+    } catch (err) {
+      console.error(err);
+      const msg = (err && err.message) || (typeof err === 'string' ? err : (err && err.toString && err.toString()) || '未知錯誤');
+      alert('處理過程出錯：' + msg);
+      autoLayoutStart.disabled = false;
+      autoLayoutCancel.disabled = false;
+    }
+  }
+  autoLayoutStart.addEventListener('click', runAutoLayout);
+
   applyZoom();
   pushHistory();
   console.log('Layout Studio ready');
