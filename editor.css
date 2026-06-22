@@ -281,6 +281,16 @@
     font-family: inherit;
     font-size: 12px;
   }
+  .mode-opt {
+    display: block;
+    font-size: 13px;
+    color: #3a3733;
+    margin: 6px 0;
+    cursor: pointer;
+  }
+  .mode-opt input { margin-right: 6px; }
+  .proxy-field { margin-top: 8px; }
+  #proxySettings summary { user-select: none; }
   .modal-progress { margin-top: 18px; }
   .progress-bar {
     height: 6px;

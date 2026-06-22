@@ -26,6 +26,7 @@
   <button id="fitBtn" type="button">適合</button>
   <div class="divider"></div>
   <button id="undoBtn" type="button">復原</button>
+  <button class="danger" id="clearBtn" type="button">清除畫布</button>
   <button class="danger" id="delBtn" type="button">刪除</button>
   <button class="primary" id="exportBtn" type="button">匯出 HTML</button>
 </div>
@@ -55,22 +56,33 @@
 <div id="autoLayoutModal" class="modal" style="display:none">
   <div class="modal-content">
     <div class="modal-title">自動拼版</div>
-    <div class="modal-desc">上傳網頁參考圖和切圖 ZIP，系統會用模板匹配自動找到每張切圖在參考圖上的位置。</div>
+    <div class="modal-desc">上傳網頁完成截圖和切圖 ZIP，系統自動把每張切圖擺到對應位置。</div>
     <div class="modal-row">
-      <label class="modal-label">1. 參考圖（網頁完成示意圖）</label>
+      <label class="modal-label">拼版方式</label>
+      <label class="mode-opt"><input type="radio" name="layoutMode" value="ssd" checked> 純像素匹配（SSD，免費／離線，不需 API）</label>
+      <label class="mode-opt"><input type="radio" name="layoutMode" value="vision"> Gemini Vision（混合精修，需 Google API key）</label>
+    </div>
+    <div class="modal-row">
+      <label class="modal-label">1. 參考圖（網頁完成截圖）</label>
       <input type="file" id="refInput" accept="image/*" class="modal-file">
     </div>
     <div class="modal-row">
       <label class="modal-label">2. 切圖 ZIP</label>
       <input type="file" id="sliceZipInput" accept=".zip" class="modal-file">
     </div>
+    <details class="modal-row" id="proxySettings">
+      <summary class="modal-label" style="cursor:pointer">Proxy 設定（呼叫 Gemini API 的後端）</summary>
+      <input type="text" id="proxyUrlInput" placeholder="Proxy URL，例如 https://xxx.workers.dev" class="modal-file proxy-field">
+      <input type="password" id="proxyTokenInput" placeholder="Proxy token（選填，對應後端 PROXY_TOKEN）" class="modal-file proxy-field">
+      <div class="modal-desc" style="margin:8px 0 0">Key 藏在 proxy，不會出現在前端。設定見 <code>worker/README.md</code>。</div>
+    </details>
     <div class="modal-progress" id="autoProgress" style="display:none">
       <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
       <div class="progress-text" id="progressText"></div>
     </div>
     <div class="modal-actions">
       <button id="autoLayoutCancel" type="button">取消</button>
-      <button id="autoLayoutStart" type="button" class="primary">開始匹配</button>
+      <button id="autoLayoutStart" type="button" class="primary">開始拼版</button>
     </div>
   </div>
 </div>

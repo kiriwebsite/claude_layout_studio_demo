@@ -1,0 +1,6 @@
+# 複製成 worker/.dev.vars 後填入真實值，用於 `wrangler dev` 本機測試。
+# .dev.vars 已被 .gitignore 排除，不會 commit。
+# Google AI Studio 取得 key：https://aistudio.google.com/apikey
+GEMINI_API_KEY="AIza..."
+# 選填：設了之後前端「Proxy token」要填同一字串
+PROXY_TOKEN=""

@@ -1,0 +1,11 @@
+name = "vision-layout-proxy"
+main = "vision-layout-worker.js"
+compatibility_date = "2024-11-01"
+
+# 選填環境變數（也可以用 `wrangler secret put` 設成 secret）：
+# [vars]
+# ALLOWED_ORIGIN = "https://你的帳號.github.io"
+#
+# GEMINI_API_KEY 和 PROXY_TOKEN 請用 secret，不要寫在這裡：
+#   wrangler secret put GEMINI_API_KEY
+#   wrangler secret put PROXY_TOKEN   # 選填
